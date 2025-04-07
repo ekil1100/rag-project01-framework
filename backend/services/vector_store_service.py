@@ -13,6 +13,7 @@ from utils.config import (
     MILVUS_CONFIG,
     CHROMA_CONFIG,
 )  # Updated import
+import re  # Import re module
 
 logger = logging.getLogger(__name__)
 
@@ -217,16 +218,31 @@ class VectorStoreService:
             # 使用 filename 作为 collection 名称前缀
             filename = embeddings_data.get("filename", "")
             # 如果有 .pdf 后缀，移除它
-            base_name = filename.replace('.pdf', '') if filename else "doc"
+            base_name_raw = filename.replace(".pdf", "") if filename else "doc"
+
+            # --- Sanitize base_name for Milvus --- Start
+            # Replace invalid characters (not letter, number, or underscore) with underscore
+            sanitized_base_name = re.sub(r"[^a-zA-Z0-9_]", "_", base_name_raw)
+            # Replace multiple consecutive underscores with a single underscore
+            sanitized_base_name = re.sub(r"_+", "_", sanitized_base_name)
+            # Remove leading and trailing underscores
+            sanitized_base_name = sanitized_base_name.strip("_")
+
+            # If sanitized name is empty, use default 'doc'
+            if not sanitized_base_name:
+                sanitized_base_name = "doc"
 
             # Ensure the collection name starts with a letter or underscore
-            if not base_name[0].isalpha() and base_name[0] != '_':
-                base_name = f"_{base_name}"
+            # (Milvus requirement)
+            if not sanitized_base_name[0].isalpha() and sanitized_base_name[0] != "_":
+                sanitized_base_name = f"m_{sanitized_base_name}"  # Prepend 'm_' if it doesn't start correctly
+            # --- Sanitize base_name for Milvus --- End
 
             # Get embedding provider
             embedding_provider = embeddings_data.get("embedding_provider", "unknown")
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-            collection_name = f"{base_name}_{embedding_provider}_{timestamp}"
+            # Use sanitized name
+            collection_name = f"{sanitized_base_name}_{embedding_provider}_{timestamp}"
 
             # 连接到Milvus
             connections.connect(alias="default", uri=config.milvus_uri)
@@ -238,7 +254,10 @@ class VectorStoreService:
 
             logger.info(f"Creating collection with dimension: {vector_dim}")
 
-            # 定义字段
+            # Define a specific name for the vector index
+            vector_index_name = "vector_idx"
+
+            # Define fields
             fields = [
                 {"name": "id", "dtype": "INT64", "is_primary": True, "auto_id": True},
                 {"name": "content", "dtype": "VARCHAR", "max_length": 5000},
@@ -248,60 +267,48 @@ class VectorStoreService:
                 {"name": "word_count", "dtype": "INT64"},
                 {"name": "page_number", "dtype": "VARCHAR", "max_length": 10},
                 {"name": "page_range", "dtype": "VARCHAR", "max_length": 10},
-                # {"name": "chunking_method", "dtype": "VARCHAR", "max_length": 50},
                 {"name": "embedding_provider", "dtype": "VARCHAR", "max_length": 50},
                 {"name": "embedding_model", "dtype": "VARCHAR", "max_length": 50},
                 {"name": "embedding_timestamp", "dtype": "VARCHAR", "max_length": 50},
-                {
-                    "name": "vector",
-                    "dtype": "FLOAT_VECTOR",
-                    "dim": vector_dim,
-                    "params": self._get_milvus_index_params(config)
-                }
+                {"name": "vector", "dtype": "FLOAT_VECTOR", "dim": vector_dim},
             ]
 
-            # 准备数据为列表格式
+            # Prepare data
             entities = []
             for emb in embeddings_data["embeddings"]:
                 entity = {
                     "content": str(emb["metadata"].get("content", "")),
-                    "document_name": embeddings_data.get("filename", ""),  # 使用 filename 而不是 document_name
+                    "document_name": embeddings_data.get(
+                        "filename", ""
+                    ),  # 使用 filename 而不是 document_name
                     "chunk_id": int(emb["metadata"].get("chunk_id", 0)),
                     "total_chunks": int(emb["metadata"].get("total_chunks", 0)),
                     "word_count": int(emb["metadata"].get("word_count", 0)),
                     "page_number": str(emb["metadata"].get("page_number", 0)),
                     "page_range": str(emb["metadata"].get("page_range", "")),
-                    # "chunking_method": str(emb["metadata"].get("chunking_method", "")),
-                    "embedding_provider": embeddings_data.get("embedding_provider", ""),  # 从顶层配置获取
-                    "embedding_model": embeddings_data.get("embedding_model", ""),  # 从顶层配置获取
-                    "embedding_timestamp": str(emb["metadata"].get("embedding_timestamp", "")),
-                    "vector": [float(x) for x in emb.get("embedding", [])]
+                    "embedding_provider": embeddings_data.get(
+                        "embedding_provider", ""
+                    ),  # 从顶层配置获取
+                    "embedding_model": embeddings_data.get(
+                        "embedding_model", ""
+                    ),  # 从顶层配置获取
+                    "embedding_timestamp": str(
+                        emb["metadata"].get("embedding_timestamp", "")
+                    ),
+                    "vector": [float(x) for x in emb.get("embedding", [])],
                 }
                 entities.append(entity)
 
-            logger.info(f"Creating Milvus collection: {collection_name}")
+            logger.info(f"Target Milvus collection: {collection_name}")
 
-            # 创建collection
-            # field_schemas = [
-            #     FieldSchema(name=field["name"],
-            #                dtype=getattr(DataType, field["dtype"]),
-            #                is_primary="is_primary" in field and field["is_primary"],
-            #                auto_id="auto_id" in field and field["auto_id"],
-            #                max_length=field.get("max_length"),
-            #                dim=field.get("dim"),
-            #                params=field.get("params"))
-            #     for field in fields
-            # ]
-
+            # Create collection schema
             field_schemas = []
             for field in fields:
                 extra_params = {}
                 if field.get('max_length') is not None:
                     extra_params['max_length'] = field['max_length']
                 if field.get('dim') is not None:
-                    extra_params['dim'] = field['dim']
-                if field.get('params') is not None:
-                    extra_params['params'] = field['params']
+                    extra_params["dim"] = field["dim"]
                 field_schema = FieldSchema(
                     name=field["name"],
                     dtype=getattr(DataType, field["dtype"]),
@@ -312,20 +319,49 @@ class VectorStoreService:
                 field_schemas.append(field_schema)
 
             schema = CollectionSchema(fields=field_schemas, description=f"Collection for {collection_name}")
-            collection = Collection(name=collection_name, schema=schema)
 
-            # 插入数据
-            logger.info(f"Inserting {len(entities)} vectors")
+            # Get or create collection
+            if not utility.has_collection(collection_name):
+                collection = Collection(name=collection_name, schema=schema)
+                logger.info(f"Collection {collection_name} created.")
+            else:
+                collection = Collection(name=collection_name)
+                logger.info(f"Using existing collection {collection_name}.")
+
+            # Insert data
+            logger.info(f"Inserting {len(entities)} vectors into {collection_name}")
             insert_result = collection.insert(entities)
+            collection.flush()
+            logger.info(f"Flushed {len(insert_result.primary_keys)} inserted vectors.")
 
-            # 创建索引
-            index_params = {
-                "metric_type": "COSINE",
-                "index_type": self._get_milvus_index_type(config),
-                "params": self._get_milvus_index_params(config)
-            }
-            collection.create_index(field_name="vector", index_params=index_params)
+            # Create index only if our specific index doesn't exist
+            # Check for the specific index name
+            if not collection.has_index(index_name=vector_index_name):
+                logger.info(
+                    f"Creating index '{vector_index_name}' for collection {collection_name}"
+                )
+                index_params = {
+                    "metric_type": "COSINE",
+                    "index_type": self._get_milvus_index_type(config),
+                    "params": self._get_milvus_index_params(config),
+                }
+                # Specify the index name during creation
+                collection.create_index(
+                    field_name="vector",
+                    index_params=index_params,
+                    index_name=vector_index_name,
+                )
+                logger.info(
+                    f"Index '{vector_index_name}' created with params: {index_params}"
+                )
+            else:
+                logger.info(
+                    f"Index '{vector_index_name}' already exists for collection {collection_name}"
+                )
+
+            # Load collection into memory
             collection.load()
+            logger.info(f"Collection {collection_name} loaded.")
 
             return {
                 "index_size": len(insert_result.primary_keys),
@@ -334,10 +370,18 @@ class VectorStoreService:
 
         except Exception as e:
             logger.error(f"Error indexing to Milvus: {str(e)}")
+            import traceback
+
+            logger.error(traceback.format_exc())
             raise
 
         finally:
-            connections.disconnect("default")
+            # Ensure disconnection happens even if errors occur
+            try:
+                connections.disconnect("default")
+                logger.info("Disconnected from Milvus.")
+            except Exception as disconnect_e:
+                logger.error(f"Error disconnecting from Milvus: {disconnect_e}")
 
     def _index_to_chroma(
         self, embeddings_data: Dict[str, Any], config: VectorDBConfig
@@ -360,8 +404,6 @@ class VectorStoreService:
 
             # --- Sanitize base_name for Chroma --- Start
             # 替换空格和特殊字符为下划线
-            import re
-
             sanitized_base_name = re.sub(r"[^a-zA-Z0-9_-]", "_", base_name_raw)
             # 移除连续的下划线
             sanitized_base_name = re.sub(r"_+", "_", sanitized_base_name)
