@@ -1,20 +1,18 @@
 // src/pages/Indexing.jsx
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import RandomImage from '../components/RandomImage'
 import { apiBaseUrl } from '../config/config'
 
 const Indexing = () => {
     const [embeddingFile, setEmbeddingFile] = useState('')
-    const [vectorDb, setVectorDb] = useState('milvus')
+    const [vectorDb, setVectorDb] = useState('chroma')
     const [indexMode, setIndexMode] = useState('standard')
     const [status, setStatus] = useState('')
     const [embeddedFiles, setEmbeddedFiles] = useState([])
     const [indexingResult, setIndexingResult] = useState(null)
     const [collections, setCollections] = useState([])
     const [selectedCollection, setSelectedCollection] = useState('')
-    const [collectionDetails, setCollectionDetails] = useState(null)
     const [providers, setProviders] = useState([])
-    const [selectedProvider, setSelectedProvider] = useState('milvus')
 
     // 数据库和索引模式的配置
     const dbConfigs = {
@@ -40,35 +38,59 @@ const Indexing = () => {
 
     useEffect(() => {
         fetchEmbeddedFiles()
-        fetchCollections()
+        // fetchCollections is now called inside the other useEffect
     }, [])
 
     useEffect(() => {
         // 当数据库改变时，重置索引模式为该数据库的第一个可用模式
-        setIndexMode(dbConfigs[vectorDb].modes[0])
-    }, [vectorDb])
+        if (dbConfigs[vectorDb]) {
+            setIndexMode(dbConfigs[vectorDb].modes[0])
+        } else {
+            // Handle case where vectorDb might not be in dbConfigs initially or after an update
+            console.warn(`Configuration for ${vectorDb} not found.`)
+            // Optionally set a default index mode or handle error
+        }
 
-    useEffect(() => {
+        // Fetch providers and collections when vectorDb changes or on initial load
         const fetchData = async () => {
             try {
-                // 获取providers列表
-                const providersResponse = await fetch(`${apiBaseUrl}/providers`)
-                const providersData = await providersResponse.json()
-                setProviders(providersData.providers)
+                // 获取providers列表 (only needed once, could be moved to the initial useEffect)
+                if (providers.length === 0) {
+                    const providersResponse = await fetch(
+                        `${apiBaseUrl}/providers`,
+                    )
+                    const providersData = await providersResponse.json()
+                    setProviders(providersData.providers)
 
-                // 获取collections列表
+                    // If initial vectorDb is not in the fetched providers, update it?
+                    // Or just ensure the default 'milvus' exists or handle gracefully.
+                    if (
+                        !providersData.providers.some((p) => p.id === vectorDb)
+                    ) {
+                        // console.warn(`Default DB ${vectorDb} not in fetched providers.`);
+                        // Optionally set vectorDb to the first available provider
+                        if (providersData.providers.length > 0) {
+                            // setVectorDb(providersData.providers[0].id); // This would trigger another re-render/fetch cycle
+                        }
+                    }
+                }
+
+                // 获取collections列表 based on the currently selected vectorDb
                 const collectionsResponse = await fetch(
-                    `${apiBaseUrl}/collections?provider=${selectedProvider}`,
+                    `${apiBaseUrl}/collections?provider=${vectorDb}`, // Use vectorDb here
                 )
                 const collectionsData = await collectionsResponse.json()
-                setCollections(collectionsData.collections)
+                setCollections(collectionsData.collections || []) // Ensure collections is always an array
+                setSelectedCollection('') // Reset selected collection when DB changes
+                setIndexingResult(null) // Clear results when DB changes
             } catch (error) {
                 console.error('Error fetching data:', error)
+                setStatus('Error fetching provider/collection data.') // Update status
             }
         }
 
         fetchData()
-    }, [selectedProvider])
+    }, [vectorDb]) // Depend on vectorDb
 
     const fetchEmbeddedFiles = async () => {
         try {
@@ -86,18 +108,6 @@ const Indexing = () => {
         } catch (error) {
             console.error('Error fetching embedded files:', error)
             setStatus('Error loading embedding files')
-        }
-    }
-
-    const fetchCollections = async () => {
-        try {
-            const response = await fetch(
-                `${apiBaseUrl}/collections/${vectorDb}`,
-            )
-            const data = await response.json()
-            setCollections(data.collections || [])
-        } catch (error) {
-            console.error('Error fetching collections:', error)
         }
     }
 
@@ -134,34 +144,59 @@ const Indexing = () => {
         if (!collectionName) return
 
         try {
+            // Use vectorDb instead of selectedProvider
             const response = await fetch(
-                `${apiBaseUrl}/collections/${selectedProvider}/${collectionName}`,
+                `${apiBaseUrl}/collections/${vectorDb}/${collectionName}`,
             )
             const data = await response.json()
 
             // 只包含有实际值的属性
             const result = {
-                database: selectedProvider,
+                database: vectorDb, // Use vectorDb
                 collection_name: data.name,
-                total_vectors: data.num_entities,
-                index_size: data.num_entities,
+                // Use optional chaining and nullish coalescing for safety
+                total_vectors: data.num_entities ?? data.vectors_count ?? 'N/A',
+                index_size: data.num_entities ?? data.vectors_count ?? 'N/A',
             }
 
             // 只在有实际值时添加可选属性
-            const indexType = data.schema?.fields?.find(
-                (f) => f.name === 'vector',
-            )?.index_params?.index_type
+            const vectorField = data.schema?.fields?.find(
+                (f) =>
+                    f.is_primary !== true &&
+                    (f.data_type === 'FloatVector' || f.type === 'vector'),
+            ) // Adjust based on actual schema structure across DBs
+            const indexParams = vectorField?.index_params ?? data.index_params // Fallback if index_params are top-level
+            const indexType = indexParams?.index_type ?? data.index_type // Further fallback
+
             if (indexType) {
                 result.index_mode = indexType
+            } else if (data.hnsw_config || data.quantization_config) {
+                // Attempt to infer index type for specific DBs like Qdrant if not directly provided
+                if (data.hnsw_config) result.index_mode = 'HNSW'
+                // Add more specific checks if needed
             }
 
             if (data.processing_time) {
                 result.processing_time = data.processing_time
             }
 
+            // Add other relevant fields if available, e.g., dimensions
+            const dimension =
+                vectorField?.params?.dim ??
+                data.vector_params?.size ??
+                data.schema?.fields?.find((f) => f.name === 'vector')?.params
+                    ?.dim
+            if (dimension) {
+                result.dimensions = dimension
+            }
+
             setIndexingResult(result)
+            setStatus(`Displayed collection: ${collectionName}`) // Update status
         } catch (error) {
             console.error('Error displaying collection:', error)
+            setStatus(
+                `Error displaying collection ${collectionName}: ${error.message}`,
+            ) // Update status
         }
     }
 
@@ -170,25 +205,33 @@ const Indexing = () => {
 
         if (
             window.confirm(
-                `Are you sure you want to delete collection "${collectionName}"?`,
+                `Are you sure you want to delete collection "${collectionName}" from ${vectorDb}?`, // Specify DB
             )
         ) {
             try {
+                // Use vectorDb instead of selectedProvider
                 await fetch(
-                    `${apiBaseUrl}/collections/${selectedProvider}/${collectionName}`,
+                    `${apiBaseUrl}/collections/${vectorDb}/${collectionName}`,
                     {
                         method: 'DELETE',
                     },
                 )
                 setSelectedCollection('')
-                // 重新获取collections列表
+                setIndexingResult(null) // Clear results after deletion
+                setStatus(
+                    `Collection "${collectionName}" deleted successfully.`,
+                ) // Update status
+                // Re-fetch collections for the current DB
                 const response = await fetch(
-                    `${apiBaseUrl}/collections?provider=${selectedProvider}`,
+                    `${apiBaseUrl}/collections?provider=${vectorDb}`, // Use vectorDb
                 )
                 const data = await response.json()
-                setCollections(data.collections)
+                setCollections(data.collections || []) // Ensure it's an array
             } catch (error) {
                 console.error('Error deleting collection:', error)
+                setStatus(
+                    `Error deleting collection ${collectionName}: ${error.message}`,
+                ) // Update status
             }
         }
     }
@@ -230,18 +273,13 @@ const Indexing = () => {
                                 Vector Database
                             </label>
                             <select
-                                value={selectedProvider}
-                                onChange={(e) =>
-                                    setSelectedProvider(e.target.value)
-                                }
+                                value={vectorDb}
+                                onChange={(e) => setVectorDb(e.target.value)}
                                 className='block w-full p-2 border rounded'
                             >
-                                {providers.map((provider) => (
-                                    <option
-                                        key={provider.id}
-                                        value={provider.id}
-                                    >
-                                        {provider.name}
+                                {Object.keys(dbConfigs).map((provider) => (
+                                    <option key={provider} value={provider}>
+                                        {provider.toUpperCase()}
                                     </option>
                                 ))}
                             </select>
@@ -257,7 +295,7 @@ const Indexing = () => {
                                 onChange={(e) => setIndexMode(e.target.value)}
                                 className='block w-full p-2 border rounded'
                             >
-                                {dbConfigs[vectorDb].modes.map((mode) => (
+                                {dbConfigs[vectorDb]?.modes.map((mode) => (
                                     <option key={mode} value={mode}>
                                         {mode.toUpperCase()}
                                     </option>

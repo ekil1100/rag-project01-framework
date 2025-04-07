@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import RandomImage from '../components/RandomImage'
 import { apiBaseUrl } from '../config/config'
 
@@ -10,7 +10,6 @@ const ChunkFile = () => {
     const [chunks, setChunks] = useState(null)
     const [status, setStatus] = useState('')
     const [activeTab, setActiveTab] = useState('chunks')
-    const [processingStatus, setProcessingStatus] = useState('')
     const [chunkedDocuments, setChunkedDocuments] = useState([])
 
     useEffect(() => {
@@ -77,7 +76,7 @@ const ChunkFile = () => {
             setChunkedDocuments(chunkedDocsWithDetails)
         } catch (error) {
             console.error('Error fetching documents:', error)
-            setProcessingStatus(`Error fetching documents: ${error.message}`)
+            setStatus(`Error fetching documents: ${error.message}`)
         }
     }
 
@@ -145,7 +144,7 @@ const ChunkFile = () => {
                 throw new Error(`HTTP error! status: ${response.status}`)
             }
 
-            setProcessingStatus('Document deleted successfully')
+            setStatus('Document deleted successfully')
             fetchLoadedDocuments()
             if (selectedDoc === docName) {
                 setSelectedDoc('')
@@ -153,7 +152,7 @@ const ChunkFile = () => {
             }
         } catch (error) {
             console.error('Error deleting document:', error)
-            setProcessingStatus(`Error deleting document: ${error.message}`)
+            setStatus(`Error deleting document: ${error.message}`)
         }
     }
 
@@ -170,7 +169,7 @@ const ChunkFile = () => {
             setActiveTab('chunks')
         } catch (error) {
             console.error('Error viewing document:', error)
-            setProcessingStatus(`Error viewing document: ${error.message}`)
+            setStatus(`Error viewing document: ${error.message}`)
         }
     }
 

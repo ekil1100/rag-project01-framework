@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
+import PropTypes from 'prop-types'
 import image1 from '../assets/01.webp'
 import image2 from '../assets/02.jpg'
 import image3 from '../assets/03.png'
@@ -42,6 +43,10 @@ const RandomImage = ({ message }) => {
             <p>{message}</p>
         </div>
     )
+}
+
+RandomImage.propTypes = {
+    message: PropTypes.string.isRequired,
 }
 
 export default RandomImage

@@ -1,5 +1,5 @@
 // src/pages/EmbeddingFile.jsx
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import RandomImage from '../components/RandomImage'
 import { apiBaseUrl } from '../config/config'
 
@@ -56,7 +56,7 @@ const EmbeddingFile = () => {
 
     useEffect(() => {
         setEmbeddingModel(modelOptions[embeddingProvider][0].value)
-    }, [embeddingProvider])
+    }, [embeddingProvider, modelOptions])
 
     const fetchAvailableDocs = async () => {
         try {

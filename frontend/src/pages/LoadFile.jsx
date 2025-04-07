@@ -1,5 +1,6 @@
 // src/pages/LoadFile.jsx
-import React, { useState, useEffect } from 'react'
+// import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import RandomImage from '../components/RandomImage'
 import { apiBaseUrl } from '../config/config'
 

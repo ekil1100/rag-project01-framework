@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import RandomImage from '../components/RandomImage'
 import { apiBaseUrl } from '../config/config'
 
@@ -7,19 +7,13 @@ const ParseFile = () => {
     const [loadingMethod, setLoadingMethod] = useState('pymupdf')
     const [parsingOption, setParsingOption] = useState('all_text')
     const [parsedContent, setParsedContent] = useState(null)
-    const [status, setStatus] = useState('')
-    const [docName, setDocName] = useState('')
-    const [isProcessed, setIsProcessed] = useState(false)
 
     const handleProcess = async () => {
         if (!file || !loadingMethod || !parsingOption) {
-            setStatus('Please select all required options')
             return
         }
 
-        setStatus('Processing...')
         setParsedContent(null)
-        setIsProcessed(false)
 
         try {
             const formData = new FormData()
@@ -38,11 +32,8 @@ const ParseFile = () => {
 
             const data = await response.json()
             setParsedContent(data.parsed_content)
-            setStatus('Processing completed successfully!')
-            setIsProcessed(true)
         } catch (error) {
             console.error('Error:', error)
-            setStatus(`Error: ${error.message}`)
         }
     }
 
@@ -50,8 +41,6 @@ const ParseFile = () => {
         const file = e.target.files[0]
         if (file) {
             setFile(file)
-            const baseName = file.name.replace('.pdf', '')
-            setDocName(baseName)
         }
     }
 
