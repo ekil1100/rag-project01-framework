@@ -1,0 +1,21 @@
+{
+  "filename": "Team Alignment Map (Community).pdf",
+  "total_chunks": 1,
+  "total_pages": 1,
+  "loading_method": "pymupdf",
+  "loading_strategy": null,
+  "chunking_strategy": null,
+  "chunking_method": "loaded",
+  "timestamp": "2025-04-06T21:57:39.042017",
+  "chunks": [
+    {
+      "content": "Our Team:\nOur Team:\nOur Team:\nProduct defining\nTeam Alignment Map\nOur Mission:\nOur Mission:\nOur Mission:\nPeriod:\nPeriod:\nPeriod:\nUnder control\nUnderestimated\nJoint Risk\nWhat can prevent us from succeeding?\nUnavailable\nJoint Resources\nWhat resources do we need?\nAvailable\nJoint Commitments\nWho does what and with whom?\nExplicit\nImplicit\nJoint Objectives\nWhat do we inteed to achive together?\nConfused\nClear",
+      "metadata": {
+        "chunk_id": 1,
+        "page_number": 1,
+        "page_range": "1",
+        "word_count": 61
+      }
+    }
+  ]
+}
